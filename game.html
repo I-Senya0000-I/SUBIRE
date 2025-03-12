@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ru">
+    <head>
+        <title>Ну крч да</title>
+    </head>
+    <body>
+        <label>Размер карты (5-20)</label><br>
+        <input id="mapSize", width="100px", height="100px", type="number", placeholder="5-20"/><br>
+        <label>Количество игроков (2-8)</label><br>
+        <input id="players", width="100px", height="100px", type="number", placeholder="2-11"/><br>
+        <button id="start">НАЧАТЬ ЖЕСТКУЮ БИТВУ ТИТАНОВ</button><br>
+        <label>Сейчас ход: </label> <div id="mark"></div>
+        <div id="mapSpace"></div>
+    </body>
+    <script>
+        var isNumber = function isNumber(value) 
+        {
+            return Number(value) != NaN && isFinite(value);
+        };
+
+        marker = document.getElementById('mark');
+        marker.style.width = "40px";
+        marker.style.height = "40px";
+        marker.style.backgroundColor = "white";
+
+
+        size = document.getElementById("mapSize");
+        size.value = 5;
+        size.onchange = function(){
+            if ((!isNumber(size.value)) || (isNumber(size.value) && (((parseInt(size.value)) > 20) || ((parseInt(size.value)) < 5)))) {size.value = 5;};
+        };
+
+        players = document.getElementById("players");
+        players.value = 2;
+        players.onchange = function(){
+            if ((!isNumber(players.value)) || (isNumber(players.value) && (((parseInt(players.value)) > 11) || ((parseInt(players.value)) < 2)))) {players.value = 2;};
+        };
+        var colors = ["red", "blue", "green", "pink", "orange", "yellow", "brown", "purple", "cyan", "aquamarine", "deeppink"];
+        
+        gamestarted = false;
+
+        document.getElementById("start").onclick = function(){start();};
+
+        var gsize = 0;
+        var gplayers = 0;
+        var gturn = 0;
+        
+        var map = [];
+
+        var playercnt = [];
+
+        mapd = document.getElementById("mapSpace");
+
+        function start() {
+
+            if (!gamestarted) {
+                marker.style.backgroundColor = "red";
+                gamestarted = true;
+                gsize = parseInt(size.value);
+                gplayers = parseInt(players.value);
+                console.log(gsize);
+                console.log(gplayers);
+                for (let c = 0; c < gplayers; c++) {
+                    playercnt.push(0);
+                }
+                for (let i = 0; i < gsize; i++) {
+                    var line = [];
+                    for (let j = 0; j < gsize; j++){ 
+                        button = document.createElement("button");
+                        button.id = i.toString()+j.toString();
+                        mapd.appendChild(button);
+                        line.push([0, "#d2d2d2"]);
+                        button.style.height = "100px";
+                        button.style.width = "100px";
+                        button.style.whiteSpace = "normal";
+                        button.textContent = "";
+                        button.style.fontSize = "40px";
+                        button.style.position = "absolute";
+                        button.style.backgroundColor = "#d2d2d2";
+                        button.style.borderRadius = "20px";
+                        button.style.left = (100*i).toString()+"px";
+                        button.style.top = (300+100*j).toString()+"px"; 
+                        button.onclick = function(){step(i, j)};
+                        
+                    }
+                    mapd.appendChild(document.createElement("br"))
+                    map.push(line);
+                }
+
+
+            }
+        }
+
+
+        function wait(seconds) {
+            return new Promise(resolve => {
+                setTimeout(resolve, seconds * 1000);
+            });
+        } 
+
+        async function update() {
+            for (let i = 0; i < gsize; i++) {
+                for (let j = 0; j < gsize; j++) {
+                    button = document.getElementById(i.toString()+j.toString());
+                    button.style.backgroundColor = map[i][j][1];
+                    if (map[i][j][0] == 0) {
+                        button.textContent = '';
+                    } else if (map[i][j][0] == 1) {
+                        button.textContent = '•';
+                    } else if (map[i][j][0] == 2) {
+                        button.textContent = ':';
+                    } else if (map[i][j][0] == 3) {
+                        button.textContent = "⁖";
+                    } else if (map[i][j][0] == 4) {
+                        button.textContent = "⁘";
+                    }
+                }
+            }
+        }
+
+        function count() {
+            var cnt = [];
+            for (let i = 0; i < gsize; i++) {
+                for (let j = 0; j < gsize; j++) {
+                    if (map[i][j][0] >= 4) {
+                        cnt.push([i, j]);
+                        
+                        button = document.getElementById(i.toString()+j.toString());
+                        button.textContent = "⁜";
+                    }
+                
+                }
+            }
+            console.log(cnt);
+            return cnt;
+        }
+
+        var fourlongs = [];
+
+        async function trueupdate() {
+            fourlongs = count();
+            while (fourlongs.length != 0) {
+                
+                for (let index = 0; index < fourlongs.length; index++) {
+                    let i = fourlongs[index][0];
+                    let j = fourlongs[index][1];
+                    console.log(fourlongs, i, j)
+                    button = document.getElementById(i.toString()+j.toString());
+                    button.textContent = "⁜";
+
+                }
+                await wait(0.5);
+
+                for (let index = 0; index < fourlongs.length; index++) {
+                    let i = fourlongs[index][0];
+                    let j = fourlongs[index][1];
+
+                    if (i != 0) {
+                        playercnt[colors.indexOf(map[i-1][j][1])] -= 1;
+                        map[i-1][j][0] += 1;
+                        map[i-1][j][1] = map[i][j][1];
+                        playercnt[gturn%gplayers] += 1;
+                    }
+                    if (i != gsize-1) {
+                        playercnt[colors.indexOf(map[i+1][j][1])] -= 1;
+                        map[i+1][j][0] += 1;
+                        map[i+1][j][1] = map[i][j][1];
+                        playercnt[gturn%gplayers] += 1;
+                    }
+                    if (j != 0) {
+                        playercnt[colors.indexOf(map[i][j-1][1])] -= 1;
+                        map[i][j-1][0] += 1;
+                        map[i][j-1][1] = map[i][j][1];
+                        playercnt[gturn%gplayers] += 1;
+                    }
+                    if (j != gsize-1) {
+                        playercnt[colors.indexOf(map[i][j+1][1])] -= 1;
+                        map[i][j+1][0] += 1;
+                        map[i][j+1][1] = map[i][j][1];
+                        playercnt[gturn%gplayers] += 1;
+                    }
+                
+                    map[i][j][0] = 0;
+                    map[i][j][1] = "#d2d2d2";
+                    playercnt[gturn%gplayers] -= 1;
+
+                }
+
+                await update();
+                await wait(0.3);
+                fourlongs = count();
+                
+                
+                
+            }
+        }
+
+        async function step(i, j) {
+            var data = map[i][j];
+
+            if (data[1] == "#d2d2d2" && gturn < gplayers) { 
+                data[0] = 3;
+                data[1] = colors[gturn%gplayers];
+
+                await update();
+                await trueupdate();
+                //await wait(0.3);
+
+                playercnt[gturn%gplayers] += 1;
+
+                var point = colors[colors[gturn%gplayers]];
+
+                gturn += 1;
+                marker.style.backgroundColor = colors[gturn%gplayers];
+
+
+
+
+            } else if (data[1] == colors[gturn%gplayers]) {
+                data[0] += 1;
+                if (data[0] > 4) {
+                    data[0] = 4;
+                }
+                await update();
+                await trueupdate();
+
+                //await wait(0.3);
+
+                var point = gturn%gplayers;
+
+                gturn += 1;
+                while (playercnt[gturn%gplayers] == 0) {
+                    gturn += 1;
+                }
+
+                console.log(playercnt, gturn);
+
+                if (gturn%gplayers == point) {
+                    await wait(1);
+                    alert(colors[gturn%gplayers]+" WINS!");
+                }
+                
+                marker.style.backgroundColor = colors[gturn%gplayers];
+
+            }
+
+        }
+
+
+        function bot(){
+            //actual bot btw XD
+            return null;
+        }
+
+
+    </script>
+</html>
