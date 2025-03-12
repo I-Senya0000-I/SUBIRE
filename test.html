@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<style>
+  .rotatable {
+    -webkit-transition: all 0.3s ease-in-out;
+    -moz-transition: all 0.3s ease-in-out;
+    -o-transition: all 0.3s ease-in-out;
+    transition: all 0.3s ease-in-out;
+  }
+
+  .rotated90 { 
+    transform:rotate(90deg); 
+    -webkit-transform:rotate(90deg); 
+    -moz-transform:rotate(90deg); 
+    -o-transform:rotate(90deg); 
+  }
+
+  .example {
+    width: 100px;
+    height: 100px;
+  }
+</style>
+
+<button onclick="myFunction()">"Rotate hello world" </button>
+
+
+<br>
+<br>
+<br>
+
+<div class="rotatable example" id="rotateMePlease">
+  Hello world! 
+</div>
+
+
+<script>
+  function myFunction() {
+    var elementToRotate = document.getElementById("rotateMePlease"); 
+    elementToRotate.classList.toggle("rotated90");
+  }
+</script>
+
+</body>
+</html>

@@ -35,7 +35,7 @@
         players.onchange = function(){
             if ((!isNumber(players.value)) || (isNumber(players.value) && (((parseInt(players.value)) > 11) || ((parseInt(players.value)) < 2)))) {players.value = 2;};
         };
-        var colors = ["red", "blue", "green", "pink", "orange", "yellow", "brown", "purple", "cyan", "aquamarine", "deeppink"];
+        var colors = ["red", "blue", "green", "pink", "orange", "cyan", "brown", "purple", "cyan", "aquamarine", "deeppink"];
         
         gamestarted = false;
 
@@ -81,6 +81,12 @@
                         button.style.borderRadius = "20px";
                         button.style.left = (100*i).toString()+"px";
                         button.style.top = (300+100*j).toString()+"px"; 
+                        button.style.webkitTransition = "all 0.3s ease-in-out";
+                        button.style.mozTransition = "all 0.3s ease-in-out";
+                        button.style.oTransition = "all 0.3s ease-in-out";
+                        button.style.transition = "all 0.3s ease-in-out";
+                        button.style.transform = "all 0.3s ease-in-out";
+
                         button.onclick = function(){step(i, j)};
                         
                     }
@@ -148,6 +154,8 @@
                     console.log(fourlongs, i, j)
                     button = document.getElementById(i.toString()+j.toString());
                     button.textContent = "⁜";
+                    button.style.webkitTransform = "rotate(180deg)";
+                    //button.style.animation = "1s ease-in-out 0.1s spin 360deg";
 
                 }
                 await wait(0.5);
