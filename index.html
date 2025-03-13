@@ -9,6 +9,7 @@
         <label>Количество игроков (2-8)</label><br>
         <input id="players", width="100px", height="100px", type="number", placeholder="2-11"/><br>
         <button id="start">НАЧАТЬ ЖЕСТКУЮ БИТВУ</button><br>
+<label id="score"></label>
         <label>Сейчас ход: </label> <div id="mark"></div>
         <div id="mapSpace"></div>
     </body>
@@ -17,6 +18,8 @@
         {
             return Number(value) != NaN && isFinite(value);
         };
+
+        score= document.getElementById("score");
 
         marker = document.getElementById('mark');
         marker.style.width = "40px";
@@ -205,6 +208,7 @@
         }
 
         async function step(i, j) {
+            score.value = playercnt.toString();
             var data = map[i][j];
 
             if (data[1] == "#d2d2d2" && gturn < gplayers) { 
