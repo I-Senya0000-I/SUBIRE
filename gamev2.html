@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Цепная реакция — улучшенный</title>
+<style>
+  :root{
+    --cell-size:72px;
+  }
+  body{ font-family: Inter, system-ui, Arial; margin:18px; background:#0f1724; color:#e6eef8; }
+  h1{ margin:0 0 12px 0; font-size:20px; }
+  .controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+  select,input,button{ padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06); background:#0b1220; color:#e6eef8; }
+  button{ cursor:pointer; }
+  #wrap{ display:flex; gap:18px; align-items:flex-start; }
+  #board{ display:grid; gap:6px; background:transparent; padding:6px; border-radius:12px; }
+  .cell{
+    width:var(--cell-size); height:var(--cell-size);
+    border-radius:10px; position:relative; overflow:visible;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border:1px solid rgba(255,255,255,0.03);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  .ownerDot{ position:absolute; left:6px; top:6px; width:0px; height:0px; border-radius:50%; box-shadow:0 2px 6px rgba(2,6,23,0.6); }
+  .dotsLayer{ position:absolute; inset:0; display:block; pointer-events:none; }
+  .dot{
+    width:12px; height:12px; border-radius:50%; position:absolute; transform:translate(-50%,-50%); box-shadow: 0 3px 6px rgba(2,6,23,0.5);
+    transition: transform 180ms ease, opacity 220ms ease;
+  }
+  .dot.pulse{ animation: pop 220ms ease; }
+  @keyframes pop { 0%{ transform: translate(-50%,-50%) scale(0.2);} 60%{ transform: translate(-50%,-50%) scale(1.15);} 100%{ transform: translate(-50%,-50%) scale(1);} }
+
+  .sidebar{ min-width:280px; padding:12px; border-radius:12px; background: linear-gradient(180deg,#071226, #08172b); border:1px solid rgba(255,255,255,0.03); }
+  .playerChip{ display:flex; gap:8px; align-items:center; padding:6px 8px; border-radius:999px; margin:6px 0; background:rgba(255,255,255,0.02); }
+  .log{ margin-top:8px; max-height:240px; overflow:auto; font-size:13px; background: rgba(255,255,255,0.01); padding:8px; border-radius:8px; border:1px solid rgba(255,255,255,0.02); }
+  .small{ font-size:13px; color:#9fb0d4; }
+  .turn{ margin-top:8px; font-weight:700; }
+  label.small{ font-size:13px; color:#a8bfdc; }
+</style>
+</head>
+<body>
+<h1>Цепная реакция — улучшенный (точки по кругу, боты)</h1>
+
+<div class="controls">
+  <label class="small">Размер:
+    <select id="mapSize">
+      <option>5</option><option>6</option><option>7</option><option>8</option><option>9</option>
+    </select>
+  </label>
+
+  <label class="small">Игроков:
+    <select id="playerCnt">
+      <option>2</option><option>3</option><option>4</option><option>5</option>
+    </select>
+  </label>
+
+  <label class="small"><input type="checkbox" id="vsBot"> Против бота</label>
+
+  <label class="small">Тип бота:
+    <select id="botSelect">
+      <option value="classic">ClassicBot (оригинал)</option>
+      <option value="smart">SmartBot (оптим. эвристика)</option>
+      <option value="alphabeta">AlphaBetaBot (α–β + эвристика)</option>
+      <option value="defender">DefenderBot</option>
+      <option value="aggressive">AggressiveBot</option>
+    </select>
+  </label>
+
+  <label class="small">Глубина бота:
+    <input id="botDepth" type="number" value="4" min="1" max="7" style="width:64px">
+  </label>
+
+  <button id="newBtn">Новая партия</button>
+  <div id="status" class="small" style="margin-left:10px"></div>
+</div>
+
+<div id="wrap">
+  <div id="board" role="grid"></div>
+
+  <div class="sidebar">
+    <div class="small">Игроки (порядок ходов — рандомизирован):</div>
+    <div id="playersList"></div>
+
+    <div class="turn" id="turnInfo">—</div>
+
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+/* Полная игровая логика + боты (JS)
+   - случайный порядок ходов каждый раунд
+   - стартовая фаза: каждый игрок по очереди ставит одну стартовую клетку с 3
+   - после стартовой фазы обычные ходы (на свою клетку +1)
+   - simulateOneStep & simulateFully как в Python версии
+   - боты: classic, smart (улучш. эвристика), alphabeta, defender, aggressive
+*/
+
+const COLORS = ["#ef4444","#3b82f6","#10b981","#fb7185","#f59e0b","#06b6d4","#8b5cf6","#f97316","#06b6d4","#a78bfa"];
+const boardEl = document.getElementById('board');
+const playersListEl = document.getElementById('playersList');
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const turnInfo = document.getElementById('turnInfo');
+
+function log(s){ logEl.innerHTML = `<div>${escapeHtml(s)}</div>` + logEl.innerHTML; }
+function escapeHtml(s){ return s.replace(/[&<>]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+class Game {
+  constructor(mapSize, playerCnt, vsBot=false, botType='classic', botDepth=4){
+    this.mapSize = mapSize;
+    this.playerCnt = playerCnt;
+    this.vsBotEnabled = vsBot;
+    this.botType = botType;
+    this.botDepth = botDepth|0;
+    this.colors = COLORS.slice(0, playerCnt);
+    this.init();
+  }
+  init(){
+    this.map = Array.from({length:this.mapSize}, ()=> Array.from({length:this.mapSize}, ()=> ({val:0, owner:-1})));
+    this.playerOrder = [...Array(this.playerCnt).keys()];
+    shuffleArray(this.playerOrder);
+    this.curMove = 0; // increments each move; index into playerOrder by curMove % playerCnt
+    this.startPhase = true; // first playerCnt moves are starts
+    this.logs = [];
+    // choose bot player index in logical numbering if vsBotEnabled
+    if(this.vsBotEnabled){
+      // pick a random player number to be the bot
+      this.botPlayer = Math.floor(Math.random()*this.playerCnt);
+      log(`Бот назначен игроком ${this.botPlayer+1}`);
+    } else {
+      this.botPlayer = -1;
+    }
+  }
+  getCurrentPlayerLogical(){
+    return this.playerOrder[this.curMove % this.playerCnt];
+  }
+  isBotTurn(){
+    return this.botPlayer >=0 && this.getCurrentPlayerLogical() === this.botPlayer;
+  }
+
+  countCellsOf(player){
+    let cnt = 0;
+    for(let i=0;i<this.mapSize;i++) for(let j=0;j<this.mapSize;j++) if(this.map[i][j].owner === player) cnt++;
+    return cnt;
+  }
+
+  end(){
+    let alive = 0;
+    for(let p=0;p<this.playerCnt;p++) if(this.countCellsOf(p)>0) alive++;
+    return alive <= 1 && !this.startPhase;
+  }
+
+  // simulate one step (cells >=4 spread)
+  simulateOneStep(currentMap){
+    const n = currentMap.length;
+    const fours = [];
+    for(let i=0;i<n;i++) for(let j=0;j<n;j++) if(currentMap[i][j].val >= 4) fours.push([i,j]);
+    const newMap = currentMap.map(row => row.map(c => ({val:c.val, owner:c.owner})));
+    for(const [x,y] of fours){
+      const owner = currentMap[x][y].owner;
+      let cnt=0;
+      if(x>0){ cnt++; newMap[x-1][y].val += 1; newMap[x-1][y].owner = owner; }
+      if(x<n-1){ cnt++; newMap[x+1][y].val += 1; newMap[x+1][y].owner = owner; }
+      if(y>0){ cnt++; newMap[x][y-1].val += 1; newMap[x][y-1].owner = owner; }
+      if(y<n-1){ cnt++; newMap[x][y+1].val += 1; newMap[x][y+1].owner = owner; }
+      newMap[x][y].val -= cnt;
+      if(newMap[x][y].val <= 0){ newMap[x][y].val = 0; newMap[x][y].owner = -1; }
+    }
+    return newMap;
+  }
+
+  simulateFully(Map){
+    let current = Map.map(r=> r.map(c=> ({val:c.val, owner:c.owner})));
+    while(true){
+      const next = this.simulateOneStep(current);
+      if(equalMaps(current,next)) break;
+      current = next;
+    }
+    return current;
+  }
+
+  // start move: place 3 on empty
+  startMove(i,j){
+    if(!(0<=i && i<this.mapSize && 0<=j && j<this.mapSize)) return false;
+    if(this.map[i][j].val !== 0 || this.map[i][j].owner !== -1) return false;
+    const player = this.getCurrentPlayerLogical();
+    this.map[i][j].val = 3;
+    this.map[i][j].owner = player;
+    this.curMove++;
+    if(this.curMove >= this.playerCnt) this.startPhase = false;
+    log(`Игрок ${player+1} (лог. ${player}) поставил старт в (${i},${j})`);
+    return true;
+  }
+
+  // normal move: add +1 to own cell and simulate full
+  playerMove(i,j){
+    if(!(0<=i && i<this.mapSize && 0<=j && j<this.mapSize)) return false;
+    const player = this.getCurrentPlayerLogical();
+    if(this.map[i][j].owner !== player) return false;
+    this.map[i][j].val += 1;
+    // simulate fully
+    this.map = this.simulateFully(this.map);
+    this.curMove++;
+    log(`Игрок ${player+1} походил в (${i},${j})`);
+    return true;
+  }
+
+  // helper for bot search: deep copy map
+  copyMap(Map){ return Map.map(r=> r.map(c=> ({val:c.val, owner:c.owner}))); }
+
+  // -------- BOT related functions (port of python complainer/minimax variants) --------
+
+  // evaluation baseline (can be tweaked)
+  evalBasic(Map, botIndex){
+    // counts and summaries
+    let botCells=0, oppCells=0, botSum=0;
+    for(let i=0;i<this.mapSize;i++){
+      for(let j=0;j<this.mapSize;j++){
+        const o = Map[i][j].owner;
+        if(o === botIndex){ botCells++; botSum += Map[i][j].val; }
+        else if(o !== -1) oppCells++;
+      }
+    }
+    if(botCells == 0) return -1000;
+    const rate = (botCells - 2*oppCells) + (botSum / botCells);
+    return rate;
+  }
+
+  // improved heuristic with factors and weights; style param can bias for defender/aggressive
+  evaluate(Map, botIndex, style='normal'){
+    // style: 'normal'|'defender'|'aggressive'
+    // factors: cell count, total value, corner/edge bonus, critical cells (val>=3), adjacency clusters
+    let botCells=0, oppCells=0, botSum=0, oppSum=0;
+    let botCritical=0, oppCritical=0, botCornerEdge=0, oppCornerEdge=0;
+    let adjacencyBonusBot=0;
+    for(let i=0;i<this.mapSize;i++){
+      for(let j=0;j<this.mapSize;j++){
+        const c = Map[i][j];
+        if(c.owner === botIndex){
+          botCells++; botSum += c.val;
+          if(c.val >= 3) botCritical++;
+          if(isCornerOrEdge(i,j,this.mapSize)) botCornerEdge += 1;
+          adjacencyBonusBot += this.neighborOwnedCount(Map,i,j,botIndex);
+        } else if(c.owner !== -1){
+          oppCells++; oppSum += c.val;
+          if(c.val >= 3) oppCritical++;
+          if(isCornerOrEdge(i,j,this.mapSize)) oppCornerEdge += 1;
+        }
+      }
+    }
+    if(botCells === 0) return -1000;
+    // weights
+    let w_cells = 1.0, w_sum = 0.3, w_critical = 0.8, w_corner = 0.5, w_adj = 0.25, w_risk=-0.6;
+    if(style === 'defender'){ w_risk = -1.0; w_critical = 1.0; }
+    if(style === 'aggressive'){ w_cells = 1.2; w_adj = 0.6; w_critical = 0.4; }
+    const score = w_cells*(botCells - 1.5*oppCells)
+                + w_sum*(botSum - oppSum)/Math.max(1,botCells)
+                + w_critical*(botCritical - oppCritical)
+                + w_corner*(botCornerEdge - oppCornerEdge)
+                + w_adj*(adjacencyBonusBot)
+                + w_risk * (oppCritical);
+    return score;
+  }
+
+  neighborOwnedCount(Map,x,y,owner){
+    let cnt=0;
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(const [dx,dy] of dirs){
+      const nx=x+dx, ny=y+dy;
+      if(nx>=0 && nx<this.mapSize && ny>=0 && ny<this.mapSize){
+        if(Map[nx][ny].owner === owner) cnt++;
+      }
+    }
+    return cnt;
+  }
+
+  // collect legal moves for player c (list of [i,j])
+  collectMoves(Map, c){
+    const moves = [];
+    for(let i=0;i<this.mapSize;i++) for(let j=0;j<this.mapSize;j++) if(Map[i][j].owner === c) moves.push([i,j]);
+    return moves;
+  }
+
+  // Classic bot: port of complainer (minimax-like without alpha-beta); returns [i,j,score]
+  classicComplainer(Map, c, depth, botIndex){
+    const basic = this.evalBasic(Map, botIndex);
+    if(depth === 0) return [-1,-1,basic];
+
+    const moves = this.collectMoves(Map, c);
+    if(moves.length === 0) return [-1,-1, -1000];
+
+    const results = [];
+    for(const [i,j] of moves){
+      let newMap = this.copyMap(Map);
+      newMap[i][j].val += 1;
+      newMap = this.simulateFully(newMap);
+      const res = this.classicComplainer(newMap, (c+1)%this.playerCnt, depth-1, botIndex);
+      results.push([i,j,res[2]]);
+    }
+    results.sort((a,b)=> a[2]-b[2]);
+    return (c === botIndex) ? results[results.length-1] : results[0];
+  }
+
+  // Minimax with alpha-beta and style
+  alphaBeta(Map, c, depth, alpha, beta, botIndex, style){
+    // terminal eval
+    if(depth === 0) return [-1,-1,this.evaluate(Map, botIndex, style)];
+    const moves = this.collectMoves(Map, c);
+    if(moves.length === 0) return [-1,-1, -1000];
+
+    let bestMove = [-1,-1];
+    if(c === botIndex){
+      let value = -Infinity;
+      for(const [i,j] of moves){
+        let newMap = this.copyMap(Map);
+        newMap[i][j].val += 1;
+        newMap = this.simulateFully(newMap);
+        const res = this.alphaBeta(newMap, (c+1)%this.playerCnt, depth-1, alpha, beta, botIndex, style);
+        if(res[2] > value){ value = res[2]; bestMove = [i,j]; }
+        alpha = Math.max(alpha, value);
+        if(alpha >= beta) break; // beta cutoff
+      }
+      return [bestMove[0], bestMove[1], value];
+    } else {
+      let value = Infinity;
+      for(const [i,j] of moves){
+        let newMap = this.copyMap(Map);
+        newMap[i][j].val += 1;
+        newMap = this.simulateFully(newMap);
+        const res = this.alphaBeta(newMap, (c+1)%this.playerCnt, depth-1, alpha, beta, botIndex, style);
+        if(res[2] < value){ value = res[2]; bestMove = [i,j]; }
+        beta = Math.min(beta, value);
+        if(alpha >= beta) break;
+      }
+      return [bestMove[0], bestMove[1], value];
+    }
+  }
+
+  // Top-level bot move chooser: returns [i,j]
+  chooseBotMove(){
+    const botIndex = this.botPlayer;
+    // If bot has no owned cells (start-phase), choose start cell logic similar to original BotStartMove
+    if(this.startPhase){
+      // Choose random empty if none better; prioritize corners near opponent?
+      // We'll choose a cell maximizing distance from edges product similar to original
+      const empties=[];
+      for(let i=0;i<this.mapSize;i++) for(let j=0;j<this.mapSize;j++) if(this.map[i][j].owner === -1) empties.push([i,j]);
+      if(empties.length === 0){
+        // fallback random
+        return [Math.floor(Math.random()*this.mapSize), Math.floor(Math.random()*this.mapSize)];
+      }
+      // prefer center-ish: compute rating = max(i,n-i-1)*max(j,n-j-1)
+      let best=null, bestRate=-1;
+      for(const [i,j] of empties){
+        const rate = Math.max(i,this.mapSize-i-1)*Math.max(j,this.mapSize-j-1);
+        if(rate > bestRate){ bestRate = rate; best = [i,j]; }
+      }
+      log(`Бот (старт) выбрал ${best[0]},${best[1]}`);
+      return best;
+    }
+
+    // otherwise different bot types:
+    const type = this.botType;
+    const depth = Math.max(1, Math.min(7, this.botDepth|0));
+    if(type === 'classic'){
+      const res = this.classicComplainer(this.copyMap(this.map), botIndex, depth, botIndex);
+      if(res[0] === -1) return this.anyOwnedCellOrRandom(botIndex);
+      return [res[0], res[1]];
+    } else if(type === 'smart'){
+      // same as alpha-beta but use evaluate with style normal
+      const res = this.alphaBeta(this.copyMap(this.map), botIndex, depth, -1e9, 1e9, botIndex, 'normal');
+      if(res[0] === -1) return this.anyOwnedCellOrRandom(botIndex);
+      return [res[0], res[1]];
+    } else if(type === 'alphabeta'){
+      const res = this.alphaBeta(this.copyMap(this.map), botIndex, depth, -1e9, 1e9, botIndex, 'normal');
+      if(res[0] === -1) return this.anyOwnedCellOrRandom(botIndex);
+      return [res[0], res[1]];
+    } else if(type === 'defender'){
+      const res = this.alphaBeta(this.copyMap(this.map), botIndex, depth, -1e9, 1e9, botIndex, 'defender');
+      if(res[0] === -1) return this.anyOwnedCellOrRandom(botIndex);
+      return [res[0], res[1]];
+    } else if(type === 'aggressive'){
+      const res = this.alphaBeta(this.copyMap(this.map), botIndex, depth, -1e9, 1e9, botIndex, 'aggressive');
+      if(res[0] === -1) return this.anyOwnedCellOrRandom(botIndex);
+      return [res[0], res[1]];
+    } else {
+      return this.anyOwnedCellOrRandom(botIndex);
+    }
+  }
+
+  anyOwnedCellOrRandom(player){
+    for(let i=0;i<this.mapSize;i++) for(let j=0;j<this.mapSize;j++) if(this.map[i][j].owner === player) return [i,j];
+    // fallback random empty
+    const empties=[];
+    for(let i=0;i<this.mapSize;i++) for(let j=0;j<this.mapSize;j++) if(this.map[i][j].owner === -1) empties.push([i,j]);
+    if(empties.length) return empties[Math.floor(Math.random()*empties.length)];
+    return [0,0];
+  }
+}
+
+/* ---------- Utilities ---------- */
+function shuffleArray(a){
+  for(let i=a.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+}
+function equalMaps(a,b){
+  for(let i=0;i<a.length;i++) for(let j=0;j<a.length;j++) if(a[i][j].val!==b[i][j].val || a[i][j].owner!==b[i][j].owner) return false;
+  return true;
+}
+function isCornerOrEdge(i,j,n){
+  if((i===0||i===n-1) && (j===0||j===n-1)) return true;
+  if(i===0||i===n-1||j===0||j===n-1) return true;
+  return false;
+}
+
+/* ---------- UI / rendering ---------- */
+
+let G = null;
+
+function buildBoard(){
+  boardEl.innerHTML = '';
+  boardEl.style.gridTemplateColumns = `repeat(${G.mapSize}, ${getComputedStyle(document.documentElement).getPropertyValue('--cell-size')})`;
+  for(let i=0;i<G.mapSize;i++){
+    for(let j=0;j<G.mapSize;j++){
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.i = i; cell.dataset.j = j;
+      cell.addEventListener('click', onCellClick);
+      const ownerMark = document.createElement('div'); ownerMark.className = 'ownerDot'; ownerMark.style.display='none';
+      const dotsLayer = document.createElement('div'); dotsLayer.className='dotsLayer';
+      cell.appendChild(ownerMark); cell.appendChild(dotsLayer);
+      boardEl.appendChild(cell);
+    }
+  }
+  renderAll();
+}
+
+function renderAll(){
+  // render cells
+  for(let i=0;i<G.mapSize;i++){
+    for(let j=0;j<G.mapSize;j++){
+      const el = boardEl.children[i*G.mapSize + j];
+      const c = G.map[i][j];
+      const ownerMark = el.querySelector('.ownerDot');
+      const dotsLayer = el.querySelector('.dotsLayer');
+      dotsLayer.innerHTML = '';
+      if(c.owner >= 0){
+        ownerMark.style.display = 'block';
+        ownerMark.style.background = G.colors[c.owner];
+      } else { ownerMark.style.display = 'none'; }
+      // draw dots arranged on circle; special: ensure no dot at absolute top-left corner of cell (we center and place around circle)
+      const cx = 36, cy = 36, r = 20; // center and radius (px)
+      const n = c.val;
+      if(n > 0){
+        for(let k=0;k<n;k++){
+          const dot = document.createElement('div');
+          dot.className = 'dot';
+          dot.style.background = (c.owner>=0) ? G.colors[c.owner] : '#9aa8c6';
+          // arrange equally spaced on circle — to avoid top-left corner dot, compute angle offset so first dot not at -135deg
+          // We'll rotate starting angle by -Math.PI/2 + 0.2 so top is shifted slightly
+          const angle = -Math.PI/2 + (2*Math.PI*k)/n;
+          const x = cx + r*Math.cos(angle);
+          const y = cy + r*Math.sin(angle);
+          dot.style.left = `${x}px`;
+          dot.style.top = `${y}px`;
+          dotsLayer.appendChild(dot);
+        }
+      }
+    }
+  }
+  // players list and order
+  playersListEl.innerHTML = '';
+  for(const p of G.playerOrder){
+    const chip = document.createElement('div'); chip.className = 'playerChip';
+    chip.style.display='flex'; chip.style.alignItems='center';
+    chip.style.gap='8px'; chip.style.margin='6px 0';
+    chip.style.padding='6px 8px'; chip.style.borderRadius='999px';
+    chip.style.background = 'rgba(255,255,255,0.02)';
+    chip.innerHTML = `<div style="width:14px;height:14px;border-radius:50%;background:${G.colors[p]};"></div> Игрок ${p+1}${G.botPlayer===p ? ' (бот)':''}`;
+    playersListEl.appendChild(chip);
+  }
+  updateTurnInfo();
+}
+
+function updateTurnInfo(){
+  if(G.startPhase){
+    turnInfo.innerText = `Фаза старта — ход игрока ${G.getCurrentPlayerLogical()+1}`;
+  } else {
+    const cur = G.getCurrentPlayerLogical();
+    turnInfo.innerText = `Обычная фаза — ход игрока ${cur+1} (${G.colors[cur]})` + (G.isBotTurn() ? ' — бот' : '');
+  }
+  statusEl.innerText = '';
+}
+
+/* ---------- input handlers ---------- */
+
+function onCellClick(e){
+  const i = Number(e.currentTarget.dataset.i);
+  const j = Number(e.currentTarget.dataset.j);
+  if(G.startPhase){
+    if(G.map[i][j].val !== 0) return; // must pick empty
+    // only current player can move (hotseat)
+    const success = G.startMove(i,j);
+    if(success){ renderAll(); afterMove(); }
+    return;
+  } else {
+    // normal move: must click own cell
+    const player = G.getCurrentPlayerLogical();
+    if(G.map[i][j].owner !== player) return;
+    G.playerMove(i,j);
+    renderAll();
+    afterMove();
+    return;
+  }
+}
+
+function afterMove(){
+  // check end
+  if(G.end()){
+    setTimeout(()=> { announceWinner(); }, 80);
+    return;
+  }
+  // if next is bot, schedule bot move
+  if(G.isBotTurn()){
+    updateTurnInfo();
+    setTimeout(()=> { botMakeMove(); }, 180);
+  } else updateTurnInfo();
+}
+
+function announceWinner(){
+  // find winner (player with cells)
+  let winner = -1;
+  for(let p=0;p<G.playerCnt;p++) if(G.countCellsOf(p)>0) winner = p;
+  if(winner === -1) { log('Ничья'); statusEl.innerText = 'Ничья'; }
+  else { log(`Игрок ${winner+1} победил!`); statusEl.innerText = `Игрок ${winner+1} победил!`; }
+}
+
+/* ---------- BOT integration ---------- */
+
+function botMakeMove(){
+  if(!G.isBotTurn()) return;
+  const [i,j] = G.chooseBotMove();
+  if(G.startPhase){
+    G.startMove(i,j);
+  } else {
+    // ensure the move is valid (if chosen a cell not owned due to race, fallback)
+    if(G.map[i][j].owner !== G.botPlayer){
+      const fallback = G.anyOwnedCellOrRandom(G.botPlayer);
+      G.playerMove(fallback[0], fallback[1]);
+    } else {
+      G.playerMove(i,j);
+    }
+  }
+  renderAll();
+  afterMove();
+}
+
+/* ---------- UI controls: new game ---------- */
+
+document.getElementById('newBtn').addEventListener('click', ()=>{
+  const size = Number(document.getElementById('mapSize').value);
+  const players = Number(document.getElementById('playerCnt').value);
+  const vsBot = document.getElementById('vsBot').checked;
+  const botType = document.getElementById('botSelect').value;
+  const botDepth = Number(document.getElementById('botDepth').value) || 4;
+
+  // create game
+  G = new Game(size, players, vsBot, botType, botDepth);
+  log(`Новая партия: поле ${size}x${size}, игроков ${players}, vsBot=${vsBot ? 'да':''}`);
+  buildBoard();
+
+  // if first to move is bot and startPhase true, let bot place its start
+  updateTurnInfo();
+  if(G.isBotTurn()){
+    setTimeout(()=> {
+      botMakeMove();
+    }, 220);
+  }
+});
+
+// Initialize default
+document.getElementById('mapSize').value = 5;
+document.getElementById('playerCnt').value = 2;
+document.getElementById('botDepth').value = 4;
+document.getElementById('botSelect').value = 'classic';
+document.getElementById('vsBot').checked = false;
+document.getElementById('newBtn').click();
+
+</script>
+</body>
+</html>
